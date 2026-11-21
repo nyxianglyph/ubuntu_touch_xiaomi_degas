@@ -1,0 +1,11 @@
+degas:
+  Vendor: Xiaomi
+  PrettyName: Xiaomi 14T
+  DeviceType: phone
+  # 1220x2712 at 520 dpi
+  GridUnit: 26
+  SupportedOrientations:
+    - Portrait
+    - Landscape
+    - InvertedLandscape
+  OfonoPlugin: binder
