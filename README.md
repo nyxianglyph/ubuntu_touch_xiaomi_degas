@@ -15,8 +15,8 @@ Based on the [CMF Phone 1 `tetris`](https://gitlab.com/ubports/porting/community
 adaptation (MT6878) and the
 [halium-generic-adaptation-build-tools](https://gitlab.com/ubports/porting/community-ports/halium-generic-adaptation-build-tools).
 
-> **Work in progress.** Not usable as a daily phone: there is no cellular
-> network yet (see [Known issues](#known-issues)).
+> **Work in progress.** The cellular fix below is in the tree but has not been
+> booted on Ubuntu Touch yet (see [Known issues](#known-issues)).
 
 ## Status
 
@@ -31,7 +31,7 @@ that firmware.
 | Bluetooth | ✅ AIDL HAL via bluebinder |
 | Wi-Fi | ✅ scan. Connecting not tested |
 | SIM cards, IMEI | ✅ both slots detected |
-| Cellular network | ❌ no registration, see below |
+| Cellular network | ❔ root cause found and fixed in the tree, not yet retested on Ubuntu Touch (see below) |
 | Audio | ⚠️ HAL starts, playback not tested |
 | ADB | ✅ through Developer Mode (needs a lock PIN) |
 | MTP | ❌ USB shows mass storage only |
@@ -39,27 +39,39 @@ that firmware.
 
 ## Known issues
 
-### No cellular network (open)
+### No cellular network: IMEI signature check (fix in tree, untested here)
 
-The SIMs and IMEI are visible and oFono shows both modems online, but they
-never register. The modem reports `SYS_NV_SIG_ERR_IND` (`+ENVSIGERR`) every
-second; MTK RIL logs `handleNvErr: 1` and sets `vendor.ril.imei.check=fail`
-(IMEI signature check failed). The modem then rejects every
-`NW_SET_RADIO_STATE` request (MIPC result 2) and the RIL retries every 50 ms.
+Symptom: the SIMs and IMEI are visible and oFono shows both modems online, but
+they never register. The modem reports `SYS_NV_SIG_ERR_IND` (`+ENVSIGERR`)
+every second, MTK RIL logs `handleNvErr: 1` and sets
+`vendor.ril.imei.check=fail`, and the modem rejects every
+`NW_SET_RADIO_STATE` request (MIPC result 2).
 
-What is known:
+Root cause: when the modem verifies its signed critical data (CPU id and both
+IMEIs), it asks the Android side for the property `ro.product.vendor.name`
+(through `ccci_rpcd`). HyperOS does not use the value from the vendor
+`build.prop` there: its init overrides it from the per-device `opcust`
+partition (`etc/carrier.prop`, limited to the keys in
+`etc/carrier_prop_white_keys_list`). The Halium init has no such hook, the
+modem gets the plain `build.prop` value, the signature does not verify and
+the modem keeps the radio off. Nothing is wrong with the NV data or the
+kernel: HyperOS on the same Halium kernel registers fine.
 
-- It is **not the kernel**: HyperOS on the same Halium kernel registers both
-  SIMs on LTE with no NV error.
-- It is not the NV data: Ubuntu Touch mounts copies of the same partitions.
-- The RIL sends the same MIPC/AT sequence to the modem as on HyperOS before the
-  first radio request (types, order and lengths match).
-- So the difference is outside the RIL: some vendor, odm or system service that
-  runs on HyperOS but not in the Ubuntu Touch Android container.
+Fix (`overlay/system/usr/libexec/lxc-android-config/opcust-props`, run after
+`mount-halium-overlay`): mount `opcust` read-only, append the whitelisted
+properties to a copy of `prop.halium` and bind it over the one in the
+container before it starts. The IMEI and its signature are not touched; the
+modem simply sees the same product string as on HyperOS.
 
-On HyperOS, `init.rc` reacts to the same RIL property
-(`persist.radio.write.cache=1`) with `rebootrecovery --bad_nv`
-(Xiaomi "IMEI protection").
+A second difference is fixed in `prop.halium`: the bootloader passes
+`androidboot.rsc=GL` and HyperOS loads `/vendor/etc/rsc/GL/ro.prop`, Halium
+does not, so the modem booted with the vendor default profile (CN, modem type
+25 with C2K) instead of the global one (type 22). The values are those of the
+`GL` profile; other regions need their own.
+
+Status: the same two changes make both SIMs register on LTE in the Sailfish
+OS port of this phone (not published yet), which runs the same Halium 14
+system image, vendor and modem. They have not been booted on Ubuntu Touch yet.
 
 ### Never write the real NV partitions without SELinux labels
 

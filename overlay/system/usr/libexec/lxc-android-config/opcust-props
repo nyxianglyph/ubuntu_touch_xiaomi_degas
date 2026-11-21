@@ -1,0 +1,84 @@
+#!/bin/sh
+# Apply the Xiaomi opcust property overlay to the Android container.
+#
+# HyperOS init overrides a few properties from the per-device "opcust"
+# partition: etc/carrier.prop, limited to the keys listed in
+# etc/carrier_prop_white_keys_list. One of them is ro.product.vendor.name.
+# The modem asks the AP for that property (ccci_rpcd,
+# IPC_RPC_QUERY_AP_SYS_PROPERTY) when it verifies its signed critical data
+# (cpuid + IMEI1 + IMEI2). With the plain vendor build.prop value the
+# signature does not verify: +ENVSIGERR, vendor.ril.imei.check=fail, and the
+# modem refuses to switch the radio on (SIMs visible, never registered).
+#
+# The Halium init has no such hook, so this script appends the whitelisted
+# opcust properties to a copy of prop.halium and binds it over the one in the
+# container. Runs after mount-halium-overlay, before the container starts.
+#
+#   opcust-props          mount opcust read-only, generate and bind
+#   opcust-props <dir>    print the result for an opcust tree at <dir>
+
+STATIC=${STATIC:-/usr/share/halium-overlay/system/etc/prop.halium}
+TARGET=/android/system/etc/prop.halium
+RUN=/run/opcust-props
+OUT=$RUN/prop.halium
+MNT=$RUN/opcust
+
+find_opcust() {
+    for dev in /dev/disk/by-partlabel/opcust /dev/block/by-name/opcust; do
+        [ -e "$dev" ] && { echo "$dev"; return; }
+    done
+    # udev links may not be there this early
+    for ue in /sys/class/block/*/uevent; do
+        if grep -qx "PARTNAME=opcust" "$ue" 2>/dev/null; then
+            echo "/dev/$(sed -n 's/^DEVNAME=//p' "$ue")"
+            return
+        fi
+    done
+}
+
+opcust_props() {
+    props=$1/etc/carrier.prop
+    keys=$1/etc/carrier_prop_white_keys_list
+    [ -f "$props" ] && [ -f "$keys" ] || return 0
+    tr -d '\r' < "$keys" | while read -r key _; do
+        case "$key" in
+            ''|\#*) continue ;;
+            # set by the bootloader before any property file is read
+            ro.boot.*) continue ;;
+        esac
+        tr -d '\r' < "$props" | awk -F= -v k="$key" '$1 == k { print; exit }'
+    done
+}
+
+generate() {
+    [ -f "$STATIC" ] && cat "$STATIC"
+    echo
+    echo "# From opcust etc/carrier.prop (opcust-props)"
+    echo "$1"
+}
+
+if [ -n "$1" ]; then
+    generate "$(opcust_props "$1")"
+    exit 0
+fi
+
+[ -e "$TARGET" ] || { echo "opcust-props: $TARGET missing"; exit 0; }
+dev=$(find_opcust)
+[ -n "$dev" ] && [ -e "$dev" ] || { echo "opcust-props: no opcust partition"; exit 0; }
+mkdir -p "$MNT"
+mount -o ro "$dev" "$MNT" || { echo "opcust-props: cannot mount $dev"; exit 0; }
+extra=$(opcust_props "$MNT")
+umount "$MNT"
+
+if [ -z "$extra" ]; then
+    echo "opcust-props: no whitelisted properties found"
+    exit 0
+fi
+
+generate "$extra" > "$OUT"
+chmod 600 "$OUT"
+echo "opcust-props: $(echo "$extra" | cut -d= -f1 | tr '\n' ' ')"
+# The target may itself be a bind of the packaged prop.halium on a shared
+# mount; keep this bind from propagating back onto that file.
+mount --make-private "$TARGET" 2>/dev/null
+mount --bind "$OUT" "$TARGET"
