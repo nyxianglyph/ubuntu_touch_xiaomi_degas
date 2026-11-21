@@ -1,3 +1,9 @@
 /build/
 /out/
 /workdir/
+
+# local build outputs
+workdir/
+out/
+ota/
+rootfs-out/
