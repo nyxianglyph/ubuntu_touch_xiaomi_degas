@@ -165,6 +165,8 @@ mount_android_partitions() {
 
 	# On systems with A/B partition layout, current slot is provided via cmdline parameter.
 	ab_slot_suffix=$(grep -o 'androidboot\.slot_suffix=..' /proc/cmdline | tail -1 | cut -d "=" -f2)
+	# degas (and other v4 bootconfig devices) pass the slot only via bootconfig
+	[ -z "$ab_slot_suffix" ] && ab_slot_suffix=$(sed -n 's/^androidboot\.slot_suffix = "\(..\)"/\1/p' /proc/bootconfig 2>/dev/null | tail -1)
 	[ ! -z "$ab_slot_suffix" ] && tell_kmsg "A/B slot system detected! Slot suffix is $ab_slot_suffix"
 
 	cat ${fstab} | while read line; do
@@ -496,6 +498,8 @@ mountroot() {
 
 	# On systems with A/B partition layout, current slot is provided via cmdline parameter.
 	ab_slot_suffix=$(grep -o 'androidboot\.slot_suffix=..' /proc/cmdline | tail -1 | cut -d "=" -f2)
+	# degas (and other v4 bootconfig devices) pass the slot only via bootconfig
+	[ -z "$ab_slot_suffix" ] && ab_slot_suffix=$(sed -n 's/^androidboot\.slot_suffix = "\(..\)"/\1/p' /proc/bootconfig 2>/dev/null | tail -1)
 	if [ -z "$path" ] && [ ! -z "$ab_slot_suffix" ] ; then
 		tell_kmsg "Searching for A/B data partition on slot $ab_slot_suffix."
 
