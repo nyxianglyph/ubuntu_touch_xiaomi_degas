@@ -89,6 +89,15 @@ If you booted an older build, check the real partitions from TWRP with
 up `nvram`, `nvdata`, `nvcfg`, `protect1`, `protect2`, `proinfo` and `persist`
 before trying any of this.
 
+### Kernel panic when PIDs exceed 32768 (fix in tree, untested here)
+
+MediaTek's kernel protection module (`mkp.ko`, one of the stock `vendor_boot`
+modules) panics with `MKP_ERR: pid is overflow` as soon as a process gets a
+PID above Android's `pid_max` of 32768. systemd raises `pid_max`, so a Linux
+userspace hits this after enough process creations.
+`overlay/system/etc/sysctl.d/95-degas-pid-max.conf` keeps `kernel.pid_max` at
+32768. Found and verified on the Sailfish OS port of this phone.
+
 ### Other
 
 - With the Ubuntu Touch kernel in `boot`, TWRP and HyperOS do not boot: Android
